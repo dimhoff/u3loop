@@ -13,9 +13,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v2
-    - run:
-      name: Install system dependencies
-      command: sudo apt-get update && sudo apt install -y libusb-1.0-0 libusb-1.0-0-dev
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt install -y libusb-1.0-0 libusb-1.0-0-dev
     - name: make
       run: make
 #    - name: make check
