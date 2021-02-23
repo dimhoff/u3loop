@@ -50,8 +50,7 @@
 #define ALTIFNUM 1
 
 #define BUFFER_CNT 64      // Amount of transfers to submit to libusb; must be an even number.
-//#define BLOCK_SIZE  16384  // TODO: make variable. Depends on link speed??? same for USB 2.0 and 3.0
-#define BLOCK_SIZE  (2*1024*1024)  // TODO: make variable. Depends on link speed??? same for USB 2.0 and 3.0
+#define DEFAULT_TRANSFER_SIZE  (2*1024*1024)  // Amount of bytes to read/write at a time
 
 #define USB_TIMEOUT 2000	//2000 millisecs == 2 seconds 
 #define MAX_DEVICE_WAIT 10	// Time in seconds to wait for re-enumration
@@ -140,11 +139,12 @@ void terminator(__attribute__((unused)) int signum) {
 void usage()
 {
 	fprintf(stderr, "Benchmark test for USB 3.0 loopback plug - %s\n", VERSION);
-	fprintf(stderr, "Usage: u3bench [-vh] [-i SEC] [-I VID:PID] [-m MODE] [-s SERIAL]\n"
-			"               [-S SPEED] [-t SEC] [-T TYPE]\n");
+	fprintf(stderr, "Usage: u3bench [-vh] [-i SEC] [-I VID:PID] [-l SIZE] [-m MODE]\n"
+			"               [-s SERIAL] [-S SPEED] [-t SEC] [-T TYPE]\n");
 	fprintf(stderr, "\nOptions:\n");
 	fprintf(stderr, " -i SEC     Report statistics every SEC seconds\n");
 	fprintf(stderr, " -I VID:PID Use specific device by USB vendor and product ID\n");
+	fprintf(stderr, " -l SIZE    Set transfer size\n");
 	fprintf(stderr, " -m MODE    Test mode\n");
 	fprintf(stderr, "              rw = Read and write (Default)\n");
 	fprintf(stderr, "              r  = Read\n");
@@ -427,6 +427,7 @@ int main(int argc, char *argv[])
 	int opt_report_ival = DEFAULT_DISPLAY_IVAL;
 	int opt_speed = U3LOOP_SPEED_SUPER;
 	int opt_mode = U3LOOP_MODE_READ_WRITE;
+	size_t opt_transfer_size = DEFAULT_TRANSFER_SIZE;
 	uint16_t opt_vid = 0;
 	uint16_t opt_pid = 0;
 	struct test_device_type *opt_test_device = &(test_device_types[0]);
@@ -436,7 +437,7 @@ int main(int argc, char *argv[])
 	int i;
 	struct state_t state = { 0 };
 
-	while ((opt = getopt(argc, argv, "i:I:d:m:s:S:t:T:vh")) != -1) {
+	while ((opt = getopt(argc, argv, "i:I:d:l:m:s:S:t:T:vh")) != -1) {
 		switch (opt) {
 		case 'i':
 			opt_report_ival = strtol(optarg, &endp, 10);
@@ -452,6 +453,17 @@ int main(int argc, char *argv[])
 			}
 			opt_vid = strtoul(optarg, NULL, 16);
 			opt_pid = strtoul(&optarg[5], NULL, 16);
+			break;
+		case 'l':
+			opt_transfer_size = strtoul(optarg, &endp, 10);
+			if (*endp != '\0') {
+				fprintf(stderr, "Argument to '-l' must be numeric\n");
+				exit(EXIT_FAILURE);
+			}
+			if (opt_transfer_size % 1024) {
+				// NOTE: cyfxbulksrcsink firmware 'hangs' if reading partial packets, default packet size is 1024
+				fprintf(stderr, "WARNING: transfer size not a multiple of 1024, this might not work\n");
+			}
 			break;
 		case 'm':
 			if (strcasecmp(optarg, "r") == 0) {
@@ -667,7 +679,7 @@ int main(int argc, char *argv[])
 		uint8_t *buf = NULL;
 #if LIBUSB_API_VERSION >= 0x01000105 && WITH_USE_DEV_MEM
 		if (use_dev_mem) {
-			buf = (uint8_t *) libusb_dev_mem_alloc(BLOCK_SIZE);
+			buf = (uint8_t *) libusb_dev_mem_alloc(opt_transfer_size);
 			if (buf == NULL) {
 				if (use_dev_mem == -1) {
 					// If first time allocation fails then
@@ -694,7 +706,7 @@ int main(int argc, char *argv[])
 #endif // LIBUSB_API_VERSION >= 0x01000105 && WITH_USE_DEV_MEM
 
 		if (buf == NULL) {
-			buf = (uint8_t *) malloc(BLOCK_SIZE);
+			buf = (uint8_t *) malloc(opt_transfer_size);
 			if (buf == NULL) {
 				perror("malloc()");
 				libusb_free_transfer(xfers[i]);
@@ -703,7 +715,7 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		memset(buf, 0xC5, BLOCK_SIZE);
+		memset(buf, 0xC5, opt_transfer_size);
 
 		// Determine endpoint
 		int ep;
@@ -720,7 +732,7 @@ int main(int argc, char *argv[])
 		}
 
 		libusb_fill_bulk_transfer(xfers[i], dev, ep, buf,
-				BLOCK_SIZE, transfer_cb, &state, USB_TIMEOUT);
+				opt_transfer_size, transfer_cb, &state, USB_TIMEOUT);
 
 		if (libusb_submit_transfer(xfers[i]) == LIBUSB_SUCCESS) {
 			state.active_transfers++;
