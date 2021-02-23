@@ -49,8 +49,8 @@
 #define IFNUM 0
 #define ALTIFNUM 1
 
-#define BUFFER_CNT 64      // Amount of transfers to submit to libusb; must be an even number.
-#define DEFAULT_TRANSFER_SIZE  (2*1024*1024)  // Amount of bytes to read/write at a time
+#define BUFFER_CNT 8      // Amount of transfers to submit to libusb; must be an even number.
+#define DEFAULT_TRANSFER_SIZE  (65*1024)  // Amount of bytes to read/write at a time
 
 #define USB_TIMEOUT 2000	//2000 millisecs == 2 seconds 
 #define MAX_DEVICE_WAIT 10	// Time in seconds to wait for re-enumration
@@ -146,7 +146,7 @@ void usage()
 	fprintf(stderr,	"            as repoted by 'lsusb'\n");
 	fprintf(stderr, " -i SEC     Report statistics every SEC seconds\n");
 	fprintf(stderr, " -I VID:PID Use specific device by USB vendor and product ID\n");
-	fprintf(stderr, " -l SIZE    Set transfer size\n");
+	fprintf(stderr, " -l SIZE    Set transfer size(default: %dKB)\n", DEFAULT_TRANSFER_SIZE / 1024);
 	fprintf(stderr, " -m MODE    Test mode\n");
 	fprintf(stderr, "              rw = Read and write (Default)\n");
 	fprintf(stderr, "              r  = Read\n");
