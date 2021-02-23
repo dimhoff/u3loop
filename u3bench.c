@@ -370,6 +370,7 @@ void transfer_cb(struct libusb_transfer *transfer)
 	struct state_t *state = (struct state_t *) transfer->user_data;
 	assert(state != NULL);
 	bool is_tx = ((transfer->endpoint & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT);
+	int err;
 
 	state->active_transfers--;
 
@@ -411,8 +412,11 @@ void transfer_cb(struct libusb_transfer *transfer)
 	}
 
 	if (!terminate) {
-		if (libusb_submit_transfer(transfer) == LIBUSB_SUCCESS) {
+		err = libusb_submit_transfer(transfer);
+		if (err == LIBUSB_SUCCESS) {
 			state->active_transfers++;
+		} else {
+			fprintf(stderr, "Failed to submit transfer: %s\n", libusb_strerror(err));
 		}
 	}
 }
@@ -669,6 +673,7 @@ int main(int argc, char *argv[])
 	// Allocate and submit USB transfers
 	int use_dev_mem = -1;
 	struct libusb_transfer *xfers[BUFFER_CNT];
+	memset(xfers, 0, sizeof(xfers));
 	for (i=0; (size_t) i < ARRAY_SIZE(xfers); i++) {
 		xfers[i] = libusb_alloc_transfer(0);
 		if (xfers[i] == NULL) {
@@ -734,8 +739,12 @@ int main(int argc, char *argv[])
 		libusb_fill_bulk_transfer(xfers[i], dev, ep, buf,
 				opt_transfer_size, transfer_cb, &state, USB_TIMEOUT);
 
-		if (libusb_submit_transfer(xfers[i]) == LIBUSB_SUCCESS) {
+		err = libusb_submit_transfer(xfers[i]);
+		if (err == LIBUSB_SUCCESS) {
 			state.active_transfers++;
+		} else {
+			fprintf(stderr, "Failed to submit transfer: %s\n", libusb_strerror(err));
+			goto fail3;
 		}
 	}
 
@@ -785,6 +794,12 @@ int main(int argc, char *argv[])
 			// Print measurement
 			print_measurement(&state);
 		}
+
+		if (!terminate && state.active_transfers != ARRAY_SIZE(xfers)) {
+			// Detect if there was an error resubmitting transfers
+			fprintf(stderr, "Some transfers could not be resubmitted, aborting\n");
+			goto fail3;
+		}
 	}
 
 	// Cumulative error report
@@ -799,12 +814,14 @@ fail3:
 			libusb_cancel_transfer(xfers[i]);
 		}
 	}
+	// TODO: add timeout
 	while (state.active_transfers != 0) {
 		libusb_handle_events(NULL);
 	}
 
 	// Free transfers
 	for (i=0; (size_t) i < ARRAY_SIZE(xfers); i++) {
+		if (xfers[i] == NULL) continue;
 		if (xfers[i]->buffer == NULL) continue;
 
 #if LIBUSB_API_VERSION >= 0x01000105 && WITH_USE_DEV_MEM
