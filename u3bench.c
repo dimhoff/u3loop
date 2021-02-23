@@ -139,9 +139,11 @@ void terminator(__attribute__((unused)) int signum) {
 void usage()
 {
 	fprintf(stderr, "Benchmark test for USB 3.0 loopback plug - %s\n", VERSION);
-	fprintf(stderr, "Usage: u3bench [-vh] [-i SEC] [-I VID:PID] [-l SIZE] [-m MODE]\n"
-			"               [-s SERIAL] [-S SPEED] [-t SEC] [-T TYPE]\n");
+	fprintf(stderr, "Usage: u3bench [-vh] [-D BBB.DDD] [-i SEC] [-I VID:PID] [-l SIZE]\n"
+			"               [-m MODE] [-s SERIAL] [-S SPEED] [-t SEC] [-T TYPE]\n");
 	fprintf(stderr, "\nOptions:\n");
+	fprintf(stderr, " -D BBB.DDD Use specific device given by bus & device number,\n");
+	fprintf(stderr,	"            as repoted by 'lsusb'\n");
 	fprintf(stderr, " -i SEC     Report statistics every SEC seconds\n");
 	fprintf(stderr, " -I VID:PID Use specific device by USB vendor and product ID\n");
 	fprintf(stderr, " -l SIZE    Set transfer size\n");
@@ -284,13 +286,25 @@ void print_report(struct state_t *s)
 	printf(" - overflow:  %u\n", s->cum_host_errors.overflow);
 }
 
-struct libusb_device_handle * open_device(uint16_t vid, uint16_t pid, char *serial_number)
+struct libusb_device_handle * open_device(char *dev_path, uint16_t vid, uint16_t pid, char *serial_number)
 {
 	struct libusb_device_handle *dev;
 	libusb_device **devs;
 	ssize_t cnt;
 	int i;
 	int err;
+
+	// If a device path is specified parse it.
+	uint8_t bus = 0;
+	uint8_t dev_num = 0;
+	if (dev_path != NULL) {
+		bus = strtoul(dev_path, NULL, 10);
+		dev_num = strtoul(&dev_path[4], NULL, 10);
+		// Assume both bus and dev_num start counting at 1
+		if (dev_num == 0) {
+			bus = 0;
+		}
+	}
 
 	cnt = libusb_get_device_list(NULL, &devs);
 	if (cnt < 0) {
@@ -307,8 +321,13 @@ struct libusb_device_handle * open_device(uint16_t vid, uint16_t pid, char *seri
 			continue;
 		}
 
-		if (desc.idVendor != vid ||
-		    desc.idProduct != pid)
+		if (bus != 0) {
+			if (bus != libusb_get_bus_number(devs[i]) ||
+			    dev_num != libusb_get_device_address(devs[i])) {
+				continue;
+			}
+		} else if (desc.idVendor != vid ||
+			   desc.idProduct != pid)
 		{
 			continue;
 		}
@@ -432,6 +451,7 @@ int main(int argc, char *argv[])
 	int opt_speed = U3LOOP_SPEED_SUPER;
 	int opt_mode = U3LOOP_MODE_READ_WRITE;
 	size_t opt_transfer_size = DEFAULT_TRANSFER_SIZE;
+	char *opt_dev_path = NULL;
 	uint16_t opt_vid = 0;
 	uint16_t opt_pid = 0;
 	struct test_device_type *opt_test_device = &(test_device_types[0]);
@@ -441,8 +461,15 @@ int main(int argc, char *argv[])
 	int i;
 	struct state_t state = { 0 };
 
-	while ((opt = getopt(argc, argv, "i:I:d:l:m:s:S:t:T:vh")) != -1) {
+	while ((opt = getopt(argc, argv, "i:I:D:l:m:s:S:t:T:vh")) != -1) {
 		switch (opt) {
+		case 'D':
+			if (strlen(optarg) != 7 || optarg[3] != '.') {
+				fprintf(stderr, "Illegal device path\n");
+				exit(EXIT_FAILURE);
+			}
+			opt_dev_path = strdup(optarg);
+			break;
 		case 'i':
 			opt_report_ival = strtol(optarg, &endp, 10);
 			if (*endp != '\0' || opt_report_ival < 0) {
@@ -540,6 +567,12 @@ int main(int argc, char *argv[])
 		opt_vid = opt_test_device->vid;
 		opt_pid = opt_test_device->pid;
 	}
+	if (opt_test_device->id == TEST_DEV_PASSMARK && opt_dev_path != NULL) {
+		// Device reenumerates after configuration, so the path changes.
+		// TODO: implement that the serial number is remembered after 1st open, and use that for second open.
+		fprintf(stderr, "Error: using dev path to specify a target passmark device isn't supported at the moment.\n");
+		exit(EXIT_FAILURE);
+	}
 
 	signal(SIGTERM, &terminator);
 	signal(SIGINT, &terminator);
@@ -566,7 +599,7 @@ int main(int argc, char *argv[])
 				(opt_serial_number != NULL) ?
 					opt_serial_number : "*");
 	}
-	dev = open_device(opt_vid, opt_pid, opt_serial_number);
+	dev = open_device(opt_dev_path, opt_vid, opt_pid, opt_serial_number);
 	if (dev == NULL) {
 		fprintf(stderr, "Unable to find usable loopback plug\n");
 		goto fail1;
@@ -613,7 +646,7 @@ int main(int argc, char *argv[])
 			// FIXME: if multiple adapters are connected; and no
 			// opt_serial_number is specified this breaks!!! get serial of
 			// previously opened device...
-			dev = open_device(opt_vid, opt_pid, opt_serial_number);
+			dev = open_device(opt_dev_path, opt_vid, opt_pid, opt_serial_number);
 		}
 
 		if (dev == NULL) {
