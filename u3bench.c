@@ -42,10 +42,7 @@
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
-#define VERSION "v0.0.0-20200321"
-
-#define VID 0x0403
-#define PID 0xff0b
+#define VERSION "v0.0.0-20210220"
 
 #define BULK_IN	 (0x01 | LIBUSB_ENDPOINT_IN)
 #define BULK_OUT 0x01
@@ -53,7 +50,8 @@
 #define ALTIFNUM 1
 
 #define BUFFER_CNT 64      // Amount of transfers to submit to libusb; must be an even number.
-#define BLOCK_SIZE  16384  // TODO: make variable. Depends on link speed??? same for USB 2.0 and 3.0
+//#define BLOCK_SIZE  16384  // TODO: make variable. Depends on link speed??? same for USB 2.0 and 3.0
+#define BLOCK_SIZE  (2*1024*1024)  // TODO: make variable. Depends on link speed??? same for USB 2.0 and 3.0
 
 #define USB_TIMEOUT 2000	//2000 millisecs == 2 seconds 
 #define MAX_DEVICE_WAIT 10	// Time in seconds to wait for re-enumration
@@ -116,29 +114,57 @@ struct state_t {
 	struct stat_counters measurement;
 };
 
+struct test_device_type {
+	int id;
+	char *name;
+	uint16_t vid; /**< Default USB Vendor ID **/
+	uint16_t pid; /**< Default USB Product ID **/
+};
+
+
+enum test_device_type_ids {
+	TEST_DEV_NONE = 0,
+	TEST_DEV_PASSMARK,
+	TEST_DEV_FX3
+};
+struct test_device_type test_device_types[] = {
+	{ TEST_DEV_PASSMARK, "passmark", 0x0403, 0xff0b },
+	{ TEST_DEV_FX3     , "fx3"     , 0x04b4, 0x00f1 },
+	{ TEST_DEV_NONE, NULL, 0, 0 }
+};
 
 void terminator(__attribute__((unused)) int signum) {
 	terminate = true;
 }
 
-void usage(const char *name)
+void usage()
 {
 	fprintf(stderr, "Benchmark test for USB 3.0 loopback plug - %s\n", VERSION);
-	fprintf(stderr, "Usage: %s [-vh] [-i SEC] [-m MODE] [-s SERIAL] [-S SPEED] [-t SEC]\n", name);
+	fprintf(stderr, "Usage: u3bench [-vh] [-i SEC] [-I VID:PID] [-m MODE] [-s SERIAL]\n"
+			"               [-S SPEED] [-t SEC] [-T TYPE]\n");
 	fprintf(stderr, "\nOptions:\n");
-	fprintf(stderr, " -i SEC    Report statistics every SEC seconds\n");
-	fprintf(stderr, " -m MODE   Test mode\n");
-       	fprintf(stderr, "             rw = Read and write (Default)\n");
-       	fprintf(stderr, "             r  = Read\n");
-       	fprintf(stderr, "             w  = Write\n");
-	fprintf(stderr, " -s SERIAL Use device with this serial number\n");
-	fprintf(stderr, " -S SPEED  Force device to work at USB speed\n");
-	fprintf(stderr, "             fs = USB 1.x Full Speed, 12 Mbit/s\n");
-	fprintf(stderr, "             hs = USB 2.0 High Speed, 480 Mbit/s\n");
-	fprintf(stderr, "             ss = USB 3.x Super Speed, 5 Gbit/s\n");
-	fprintf(stderr, " -t SEC    Time limit of test in seconds (0=forever)\n");
-	fprintf(stderr, " -v        Increase verbosity level. Can be used multiple times\n");
-	fprintf(stderr, " -h        This help message\n");
+	fprintf(stderr, " -i SEC     Report statistics every SEC seconds\n");
+	fprintf(stderr, " -I VID:PID Use specific device by USB vendor and product ID\n");
+	fprintf(stderr, " -m MODE    Test mode\n");
+	fprintf(stderr, "              rw = Read and write (Default)\n");
+	fprintf(stderr, "              r  = Read\n");
+	fprintf(stderr, "              w  = Write\n");
+	fprintf(stderr, " -s SERIAL  Use device with this serial number\n");
+	fprintf(stderr, " -S SPEED   Force device to work at USB speed\n");
+	fprintf(stderr, "              fs = USB 1.x Full Speed, 12 Mbit/s\n");
+	fprintf(stderr, "              hs = USB 2.0 High Speed, 480 Mbit/s\n");
+	fprintf(stderr, "              ss = USB 3.x Super Speed, 5 Gbit/s\n");
+	fprintf(stderr, " -t SEC     Time limit of test in seconds (0=forever)\n");
+	fprintf(stderr, " -T TYPE    Test device type(use 'list' for available options)\n");
+	fprintf(stderr, " -v         Increase verbosity level. Can be used multiple times\n");
+	fprintf(stderr, " -h         This help message\n");
+}
+
+void usage_device_types()
+{
+	fprintf(stderr, "Supported device types:\n");
+	fprintf(stderr, "  passmark - Passmark USB 3.0 loopback tester\n");
+	fprintf(stderr, "  fx3 - Cypress FX3/CX3 with cyfxbulksrcsink example firmware\n");
 }
 
 void print_measurement(struct state_t *s)
@@ -258,7 +284,7 @@ void print_report(struct state_t *s)
 	printf(" - overflow:  %u\n", s->cum_host_errors.overflow);
 }
 
-struct libusb_device_handle * open_device(char *serial_number)
+struct libusb_device_handle * open_device(uint16_t vid, uint16_t pid, char *serial_number)
 {
 	struct libusb_device_handle *dev;
 	libusb_device **devs;
@@ -281,8 +307,8 @@ struct libusb_device_handle * open_device(char *serial_number)
 			continue;
 		}
 
-		if (desc.idVendor != VID ||
-		    desc.idProduct != PID)
+		if (desc.idVendor != vid ||
+		    desc.idProduct != pid)
 		{
 			continue;
 		}
@@ -401,13 +427,16 @@ int main(int argc, char *argv[])
 	int opt_report_ival = DEFAULT_DISPLAY_IVAL;
 	int opt_speed = U3LOOP_SPEED_SUPER;
 	int opt_mode = U3LOOP_MODE_READ_WRITE;
+	uint16_t opt_vid = 0;
+	uint16_t opt_pid = 0;
+	struct test_device_type *opt_test_device = &(test_device_types[0]);
 	int retval = EXIT_FAILURE;
 	int err;
 	ssize_t len;
 	int i;
 	struct state_t state = { 0 };
 
-	while ((opt = getopt(argc, argv, "i:m:s:S:t:vh")) != -1) {
+	while ((opt = getopt(argc, argv, "i:I:d:m:s:S:t:T:vh")) != -1) {
 		switch (opt) {
 		case 'i':
 			opt_report_ival = strtol(optarg, &endp, 10);
@@ -415,6 +444,14 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "Argument to '-i' must be a positive number\n");
 				exit(EXIT_FAILURE);
 			}
+			break;
+		case 'I':
+			if (strlen(optarg) != 9 || optarg[4] != ':') {
+				fprintf(stderr, "Illegal VID PID comibantion. Use format: VVVV:PPPP\n");
+				exit(EXIT_FAILURE);
+			}
+			opt_vid = strtoul(optarg, NULL, 16);
+			opt_pid = strtoul(&optarg[5], NULL, 16);
 			break;
 		case 'm':
 			if (strcasecmp(optarg, "r") == 0) {
@@ -450,17 +487,42 @@ int main(int argc, char *argv[])
 				exit(EXIT_FAILURE);
 			}
 			break;
+		case 'T':
+			if (strcasecmp(optarg, "list") == 0) {
+				usage_device_types();
+				exit(EXIT_SUCCESS);
+			}
+			struct test_device_type *tdt_p = test_device_types;
+			opt_test_device = NULL;
+			while (tdt_p->id != TEST_DEV_NONE) {
+				if (strcasecmp(optarg, tdt_p->name) == 0) {
+					opt_test_device = tdt_p;
+					break;
+				}
+				tdt_p++;
+			}
+			if (opt_test_device == NULL) {
+				fprintf(stderr, "Unknown device type\n");
+				usage_device_types();
+				exit(EXIT_FAILURE);
+			}
+			break;
 		case 'v':
 			verbose++;
 			break;
 		case 'h':
-			usage(argv[0]);
+			usage();
 			exit(EXIT_SUCCESS);
 			break;
 		default: /* '?' */
-			usage(argv[0]);
+			usage();
 			exit(EXIT_FAILURE);
 		}
+	}
+
+	if (opt_vid == 0) {
+		opt_vid = opt_test_device->vid;
+		opt_pid = opt_test_device->pid;
 	}
 
 	signal(SIGTERM, &terminator);
@@ -481,99 +543,108 @@ int main(int argc, char *argv[])
 
 
 	// Find device and open it
-	dev = open_device(opt_serial_number);
+	if (verbose >= 2) {
+		printf("Looking for device of type '%s', id: %04x:%04x, sn: %s\n",
+				opt_test_device->name,
+				opt_vid, opt_pid,
+				(opt_serial_number != NULL) ?
+					opt_serial_number : "*");
+	}
+	dev = open_device(opt_vid, opt_pid, opt_serial_number);
 	if (dev == NULL) {
 		fprintf(stderr, "Unable to find usable loopback plug\n");
 		goto fail1;
 	}
 
-	// Configure device
-	struct u3loop_config dev_config = {
-		.mode = opt_mode,
-		.ep_type = U3LOOP_EP_TYPE_BULK,
-		.ep_in = BULK_IN & LIBUSB_ENDPOINT_ADDRESS_MASK,
-		.ep_out = BULK_OUT & LIBUSB_ENDPOINT_ADDRESS_MASK,
-		.ss_burst_len = 0x10,
-		.polling_interval = 0x01,
-		.hs_bulk_nak_interval = 0x00,
-		.iso_transactions_per_bus_interval = 0x03,
-		.iso_bytes_per_bus_interval = htole16(0xC000), // Depends on burst length
-		.speed = opt_speed,
-		.buffer_count = 0x02, // from USB3Test
-		.buffer_size = htole16(0xc000) // 0xc000 for read or write; 0x6000 for read and write
-	};
-	if (opt_mode == U3LOOP_MODE_READ_WRITE) {
-		dev_config.buffer_size = htole16(0x6000);
-	}
-	len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
-			U3LOOP_CMD_SET_CONFIG, 0,
-			(unsigned char *) &dev_config, sizeof(dev_config),
-			USB_TIMEOUT);
-	if (len < LIBUSB_SUCCESS) {
-		fprintf(stderr, "Failed to configure device for test: %s\n",
-				libusb_error_name(len));
-		goto fail2;
-	}
-	libusb_release_interface(dev, IFNUM);
-	libusb_close(dev);
-	dev = NULL;
+	if (opt_test_device->id == TEST_DEV_PASSMARK) {
+		// Configure device
+		struct u3loop_config dev_config = {
+			.mode = opt_mode,
+			.ep_type = U3LOOP_EP_TYPE_BULK,
+			.ep_in = BULK_IN & LIBUSB_ENDPOINT_ADDRESS_MASK,
+			.ep_out = BULK_OUT & LIBUSB_ENDPOINT_ADDRESS_MASK,
+			.ss_burst_len = 0x10,
+			.polling_interval = 0x01,
+			.hs_bulk_nak_interval = 0x00,
+			.iso_transactions_per_bus_interval = 0x03,
+			.iso_bytes_per_bus_interval = htole16(0xC000), // Depends on burst length
+			.speed = opt_speed,
+			.buffer_count = 0x02, // from USB3Test
+			.buffer_size = htole16(0xc000) // 0xc000 for read or write; 0x6000 for read and write
+		};
+		if (opt_mode == U3LOOP_MODE_READ_WRITE) {
+			dev_config.buffer_size = htole16(0x6000);
+		}
+		len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
+				U3LOOP_CMD_SET_CONFIG, 0,
+				(unsigned char *) &dev_config, sizeof(dev_config),
+				USB_TIMEOUT);
+		if (len < LIBUSB_SUCCESS) {
+			fprintf(stderr, "Failed to configure device for test: %s\n",
+					libusb_error_name(len));
+			goto fail2;
+		}
+		libusb_release_interface(dev, IFNUM);
+		libusb_close(dev);
+		dev = NULL;
 
-	if (verbose) {
-		printf("Waiting for device to re-enumrate\n");
-	}
+		if (verbose) {
+			printf("Waiting for device to re-enumrate\n");
+		}
 
-	for (i=0; dev == NULL && i < MAX_DEVICE_WAIT; i++) {
-		sleep(1);
-		// FIXME: if multiple adapters are connected; and no
-		// opt_serial_number is specified this breaks!!! get serial of
-		// previously opened device...
-		dev = open_device(opt_serial_number);
-	}
+		for (i=0; dev == NULL && i < MAX_DEVICE_WAIT; i++) {
+			sleep(1);
+			// FIXME: if multiple adapters are connected; and no
+			// opt_serial_number is specified this breaks!!! get serial of
+			// previously opened device...
+			dev = open_device(opt_vid, opt_pid, opt_serial_number);
+		}
 
-	if (dev == NULL) {
-		fprintf(stderr, "Timeout waiting for device to re-enumerate\n");
-		goto fail1;
-	}
+		if (dev == NULL) {
+			fprintf(stderr, "Timeout waiting for device to re-enumerate\n");
+			goto fail1;
+		}
 
-	// Disable Link Power Management
-	len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
-			U3LOOP_CMD_CONF_LPM | U3LOOP_LPM_ENTRY_DISABLE,
-			0, NULL, 0, USB_TIMEOUT);
-	if (len < LIBUSB_SUCCESS) {
-		fprintf(stderr, "Warning: Failed to set LPM entry mode: %s\n",
-				libusb_error_name(len));
-	}
+		// Disable Link Power Management
+		len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
+				U3LOOP_CMD_CONF_LPM | U3LOOP_LPM_ENTRY_DISABLE,
+				0, NULL, 0, USB_TIMEOUT);
+		if (len < LIBUSB_SUCCESS) {
+			fprintf(stderr, "Warning: Failed to set LPM entry mode: %s\n",
+					libusb_error_name(len));
+		}
 
-	/*
-	// Enable Error counters
-	struct u3loop_error_cfg err_cfg = {
-		.phy_err_mask = htole16(0x1ff),
-		.ll_err_mask = htole16(0x7fff)
-	};
-	len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
-			U3LOOP_CMD_CONF_ERROR_COUNTERS, 0,
-			(unsigned char *) &err_cfg, sizeof(err_cfg),
-			USB_TIMEOUT);
-	if (len < LIBUSB_SUCCESS) {
-		fprintf(stderr, "Warning: Unable to enable error counters:"
-				" %s\n", libusb_error_name(len));
-	}
-	len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
-			U3LOOP_CMD_RESET_ERROR_COUNTERS,
-			0, NULL, 0, USB_TIMEOUT);
-	if (len < LIBUSB_SUCCESS) {
-		fprintf(stderr, "Warning: Unable to reset error counters: "
-				"%s\n", libusb_error_name(len));
-	}
-	*/
+		/*
+		// Enable Error counters
+		struct u3loop_error_cfg err_cfg = {
+			.phy_err_mask = htole16(0x1ff),
+			.ll_err_mask = htole16(0x7fff)
+		};
+		len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
+				U3LOOP_CMD_CONF_ERROR_COUNTERS, 0,
+				(unsigned char *) &err_cfg, sizeof(err_cfg),
+				USB_TIMEOUT);
+		if (len < LIBUSB_SUCCESS) {
+			fprintf(stderr, "Warning: Unable to enable error counters:"
+					" %s\n", libusb_error_name(len));
+		}
+		len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
+				U3LOOP_CMD_RESET_ERROR_COUNTERS,
+				0, NULL, 0, USB_TIMEOUT);
+		if (len < LIBUSB_SUCCESS) {
+			fprintf(stderr, "Warning: Unable to reset error counters: "
+					"%s\n", libusb_error_name(len));
+		}
+		*/
 
-	// Disable LCD display during test
-	len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
-			U3LOOP_CMD_SET_DISPLAY_MODE | U3LOOP_DISPLAY_DISABLE,
-			0, NULL, 0, USB_TIMEOUT);
-	if (len < LIBUSB_SUCCESS) {
-		fprintf(stderr, "Warning: Failed to set display mode: %s\n",
-				libusb_error_name(len));
+		// Disable LCD display during test
+		len = libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
+				U3LOOP_CMD_SET_DISPLAY_MODE | U3LOOP_DISPLAY_DISABLE,
+				0, NULL, 0, USB_TIMEOUT);
+		if (len < LIBUSB_SUCCESS) {
+			fprintf(stderr, "Warning: Failed to set display mode: %s\n",
+					libusb_error_name(len));
+		}
 	}
 
 	// Get start time
@@ -736,15 +807,17 @@ fail3:
 		libusb_free_transfer(xfers[i]);
 	}
 fail2:
-	// Enable LCD display again
-	libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
-			U3LOOP_CMD_SET_DISPLAY_MODE | U3LOOP_DISPLAY_ENABLE,
-			0, NULL, 0, USB_TIMEOUT);
+	if (opt_test_device->id == TEST_DEV_PASSMARK) {
+		// Enable LCD display again
+		libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
+				U3LOOP_CMD_SET_DISPLAY_MODE | U3LOOP_DISPLAY_ENABLE,
+				0, NULL, 0, USB_TIMEOUT);
 
-	// Enable Link Power Management
-	libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
-			U3LOOP_CMD_CONF_LPM | U3LOOP_LPM_ENTRY_ENABLE,
-			0, NULL, 0, USB_TIMEOUT);
+		// Enable Link Power Management
+		libusb_control_transfer(dev, LIBUSB_REQUEST_TYPE_VENDOR, 0,
+				U3LOOP_CMD_CONF_LPM | U3LOOP_LPM_ENTRY_ENABLE,
+				0, NULL, 0, USB_TIMEOUT);
+	}
 
 	libusb_release_interface(dev, IFNUM);
 	libusb_close(dev);
