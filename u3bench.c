@@ -144,7 +144,7 @@ void usage()
 	fprintf(stderr, "\nOptions:\n");
 	fprintf(stderr, " -D BBB.DDD Use specific device given by bus & device number,\n");
 	fprintf(stderr,	"            as repoted by 'lsusb'\n");
-	fprintf(stderr, " -i SEC     Report statistics every SEC seconds\n");
+	fprintf(stderr, " -i SEC     Report intermediate statistics every SEC seconds. 0 = never.\n");
 	fprintf(stderr, " -I VID:PID Use specific device by USB vendor and product ID\n");
 	fprintf(stderr, " -l SIZE    Set transfer size(default: %dKB)\n", DEFAULT_TRANSFER_SIZE / 1024);
 	fprintf(stderr, " -m MODE    Test mode\n");
@@ -782,11 +782,13 @@ int main(int argc, char *argv[])
 	}
 
 
-	printf("Time, Ops, "
-		"Speed(mbps), Avg. Speed(mbps), "
-		"TX Speed(mbps), TX Avg. Speed(mbps), "
-		"RX Speed(mbps), RX Avg. Speed(mbps), "
-		"Host Error count\n");
+	if (opt_report_ival > 0) {
+		printf("Time, Ops, "
+			"Speed(mbps), Avg. Speed(mbps), "
+			"TX Speed(mbps), TX Avg. Speed(mbps), "
+			"RX Speed(mbps), RX Avg. Speed(mbps), "
+			"Host Error count\n");
+	}
 
 	// Main loop
 	bool take_measurement = false;
@@ -821,7 +823,7 @@ int main(int argc, char *argv[])
 		}
 
 		// Take Measurement
-		if (take_measurement || terminate) {
+		if (take_measurement || (terminate && opt_report_ival != 0)) {
 			take_measurement = false;
 
 			// Print measurement
