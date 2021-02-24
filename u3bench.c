@@ -139,9 +139,10 @@ void terminator(__attribute__((unused)) int signum) {
 void usage()
 {
 	fprintf(stderr, "Benchmark test for USB 3.0 loopback plug - %s\n", VERSION);
-	fprintf(stderr, "Usage: u3bench [-vh] [-D BBB.DDD] [-i SEC] [-I VID:PID] [-l SIZE]\n"
+	fprintf(stderr, "Usage: u3bench [-Cvh] [-D BBB.DDD] [-i SEC] [-I VID:PID] [-l SIZE]\n"
 			"               [-m MODE] [-s SERIAL] [-S SPEED] [-t SEC] [-T TYPE]\n");
 	fprintf(stderr, "\nOptions:\n");
+	fprintf(stderr, " -C         Only print CSV report at end and errors.\n");
 	fprintf(stderr, " -D BBB.DDD Use specific device given by bus & device number,\n");
 	fprintf(stderr,	"            as repoted by 'lsusb'\n");
 	fprintf(stderr, " -i SEC     Report intermediate statistics every SEC seconds. 0 = never.\n");
@@ -240,7 +241,7 @@ void print_measurement(struct state_t *s)
 	s->measurement = s->ctrs;
 }
 
-void print_report(struct state_t *s)
+void print_report(struct state_t *s, bool csv)
 {
 	struct timespec now;
 
@@ -265,25 +266,41 @@ void print_report(struct state_t *s)
 		rx_avg_mbps = s->ctrs.rx_bytes * 8;
 	}
 
-	printf("\nTest Report:\n");
-	printf("------------\n");
-	printf("Test duration: %lu Sec.\n", total_time_usec / 1000000);
-	printf("Total operations: %llu Ops.\n", s->ops);
-	printf("\n");
-	printf("Bytes written: % 15ld\n", s->ctrs.tx_bytes);
-	printf("Bytes read:    % 15ld\n", s->ctrs.rx_bytes);
-	printf("\n");
-	printf("Average speed:       %7.2f Mbit/s\n", avg_mbps);
-	printf("Average write speed: %7.2f Mbit/s\n", tx_avg_mbps);
-	printf("Average read speed:  %7.2f Mbit/s\n", rx_avg_mbps);
-	printf("\n");
-	printf("Host Errors:\n");
-	printf(" - data_corrupt: %u\n", s->cum_host_errors.data_corrupt);
-	printf(" - generic:   %u\n", s->cum_host_errors.error);
-	printf(" - length:    %u\n", s->cum_host_errors.length);
-	printf(" - stall:     %u\n", s->cum_host_errors.stall);
-	printf(" - timeout:   %u\n", s->cum_host_errors.timeout);
-	printf(" - overflow:  %u\n", s->cum_host_errors.overflow);
+	if (csv) {
+		printf("%lu, ", total_time_usec / 1000000);
+		printf("%llu, ", s->ops);
+		printf("%ld, ", s->ctrs.tx_bytes);
+		printf("%ld, ", s->ctrs.rx_bytes);
+		printf("%.2f, ", avg_mbps);
+		printf("%.2f, ", tx_avg_mbps);
+		printf("%.2f, ", rx_avg_mbps);
+		printf("%u, ", s->cum_host_errors.data_corrupt);
+		printf("%u, ", s->cum_host_errors.error);
+		printf("%u, ", s->cum_host_errors.length);
+		printf("%u, ", s->cum_host_errors.stall);
+		printf("%u, ", s->cum_host_errors.timeout);
+		printf("%u\n", s->cum_host_errors.overflow);
+	} else {
+		printf("\nTest Report:\n");
+		printf("------------\n");
+		printf("Test duration: %lu Sec.\n", total_time_usec / 1000000);
+		printf("Total operations: %llu Ops.\n", s->ops);
+		printf("\n");
+		printf("Bytes written: % 15ld\n", s->ctrs.tx_bytes);
+		printf("Bytes read:    % 15ld\n", s->ctrs.rx_bytes);
+		printf("\n");
+		printf("Average speed:       %7.2f Mbit/s\n", avg_mbps);
+		printf("Average write speed: %7.2f Mbit/s\n", tx_avg_mbps);
+		printf("Average read speed:  %7.2f Mbit/s\n", rx_avg_mbps);
+		printf("\n");
+		printf("Host Errors:\n");
+		printf(" - data_corrupt: %u\n", s->cum_host_errors.data_corrupt);
+		printf(" - generic:   %u\n", s->cum_host_errors.error);
+		printf(" - length:    %u\n", s->cum_host_errors.length);
+		printf(" - stall:     %u\n", s->cum_host_errors.stall);
+		printf(" - timeout:   %u\n", s->cum_host_errors.timeout);
+		printf(" - overflow:  %u\n", s->cum_host_errors.overflow);
+	}
 }
 
 struct libusb_device_handle * open_device(char *dev_path, uint16_t vid, uint16_t pid, char *serial_number)
@@ -455,14 +472,18 @@ int main(int argc, char *argv[])
 	uint16_t opt_vid = 0;
 	uint16_t opt_pid = 0;
 	struct test_device_type *opt_test_device = &(test_device_types[0]);
+	bool opt_csv = false;
 	int retval = EXIT_FAILURE;
 	int err;
 	ssize_t len;
 	int i;
 	struct state_t state = { 0 };
 
-	while ((opt = getopt(argc, argv, "i:I:D:l:m:s:S:t:T:vh")) != -1) {
+	while ((opt = getopt(argc, argv, "CD:i:I:l:m:s:S:t:T:vh")) != -1) {
 		switch (opt) {
+		case 'C':
+			opt_csv = true;
+			break;
 		case 'D':
 			if (strlen(optarg) != 7 || optarg[3] != '.') {
 				fprintf(stderr, "Illegal device path\n");
@@ -573,6 +594,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Error: using dev path to specify a target passmark device isn't supported at the moment.\n");
 		exit(EXIT_FAILURE);
 	}
+	if (opt_csv) opt_report_ival = 0;
 
 	signal(SIGTERM, &terminator);
 	signal(SIGINT, &terminator);
@@ -838,7 +860,7 @@ int main(int argc, char *argv[])
 	}
 
 	// Cumulative error report
-	print_report(&state);
+	print_report(&state, opt_csv);
 
 	retval = EXIT_SUCCESS;
 
