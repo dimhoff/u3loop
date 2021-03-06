@@ -1,0 +1,64 @@
+diff -pur cyfx3sdk/firmware/basic_examples/cyfxbulksrcsink.orig/cyfxbulksrcsink.c cyfx3sdk/firmware/basic_examples/cyfxbulksrcsink/cyfxbulksrcsink.c
+--- cyfx3sdk/firmware/basic_examples/cyfxbulksrcsink.orig/cyfxbulksrcsink.c	2018-05-23 11:24:56.000000000 +0200
++++ cyfx3sdk/firmware/basic_examples/cyfxbulksrcsink/cyfxbulksrcsink.c	2021-02-25 21:12:19.311384868 +0100
+@@ -134,6 +134,7 @@ CyFxBulkSrcSinkApplnDebugInit (void)
+     {
+         CyFxAppErrorHandler(apiRetStatus);
+     }
++#if 0
+     else
+     {
+         /* Set the test GPIO as an output and update the value to 0. */
+@@ -183,6 +184,7 @@ CyFxBulkSrcSinkApplnDebugInit (void)
+     }
+ 
+     CyU3PDebugPreamble(CyFalse);
++#endif // disabled GPIO/UART code
+ }
+ 
+ 
+@@ -699,7 +701,7 @@ CyFxBulkSrcSinkApplnInit (void)
+     }
+ 
+     /* Change GPIO state again. */
+-    CyU3PGpioSimpleSetValue (FX3_GPIO_TEST_OUT, CyTrue);
++//    CyU3PGpioSimpleSetValue (FX3_GPIO_TEST_OUT, CyTrue);
+ 
+     /* Set the USB Enumeration descriptors */
+ 
+@@ -1203,7 +1205,7 @@ main (void)
+     io_cfg.isDQ32Bit = CyFalse;
+     io_cfg.s0Mode = CY_U3P_SPORT_INACTIVE;
+     io_cfg.s1Mode = CY_U3P_SPORT_INACTIVE;
+-    io_cfg.useUart   = CyTrue;
++    io_cfg.useUart   = CyFalse;
+     io_cfg.useI2C    = CyFalse;
+     io_cfg.useI2S    = CyFalse;
+     io_cfg.useSpi    = CyFalse;
+@@ -1211,7 +1213,7 @@ main (void)
+ 
+     /* Enable the GPIO which would have been setup by 2-stage booter. */
+     io_cfg.gpioSimpleEn[0]  = 0;
+-    io_cfg.gpioSimpleEn[1]  = FX3_GPIO_TO_HIFLAG(FX3_GPIO_TEST_OUT);
++    io_cfg.gpioSimpleEn[1]  = 0;
+     io_cfg.gpioComplexEn[0] = 0;
+     io_cfg.gpioComplexEn[1] = 0;
+     status = CyU3PDeviceConfigureIOMatrix (&io_cfg);
+diff -pur cyfx3sdk/firmware/basic_examples/cyfxbulksrcsink.orig/makefile cyfx3sdk/firmware/basic_examples/cyfxbulksrcsink/makefile
+--- cyfx3sdk/firmware/basic_examples/cyfxbulksrcsink.orig/makefile	2018-05-23 11:24:56.000000000 +0200
++++ cyfx3sdk/firmware/basic_examples/cyfxbulksrcsink/makefile	2021-02-21 19:11:06.196159300 +0100
+@@ -15,6 +15,7 @@
+ ##
+ 
+ FX3FWROOT=../../..
++ELF2IMG=$(FX3FWROOT)/util/elf2img/elf2img
+ 
+ all:compile
+ 
+@@ -63,5 +64,6 @@ clean:
+ 
+ 
+ compile: $(C_OBJECT) $(A_OBJECT) $(EXES)
++	$(ELF2IMG) -i $(MODULE).elf -o $(MODULE).img -v
+ 
+ #[]#

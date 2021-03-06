@@ -1,0 +1,64 @@
+Only in cyusb_linux_1.0.5/lib: libcyusb.a
+diff -pur cyusb_linux_1.0.5.orig/lib/libcyusb.cpp cyusb_linux_1.0.5/lib/libcyusb.cpp
+--- cyusb_linux_1.0.5.orig/lib/libcyusb.cpp	2017-12-18 08:21:06.000000000 +0100
++++ cyusb_linux_1.0.5/lib/libcyusb.cpp	2021-02-25 21:22:30.638569874 +0100
+@@ -86,7 +86,7 @@ parse_configfile (
+ 	char *cp1, *cp2, *cp3;
+ 	int i;
+ 
+-	inp = fopen("/etc/cyusb.conf", "r");
++	inp = fopen("cyusb.conf", "r");
+ 	if (inp == NULL)
+ 		return;
+ 
+@@ -133,7 +133,7 @@ parse_configfile (
+ 			}
+ 		}
+ 		else {
+-			printf("Error in config file /etc/cyusb.conf: %s \n",buf);
++			printf("Error in config file cyusb.conf: %s \n",buf);
+ 			exit(1);
+ 		}
+ 	}
+@@ -245,9 +245,9 @@ int cyusb_open (
+ 	int fd1;
+ 	int r;
+ 
+-	fd1 = open("/etc/cyusb.conf", O_RDONLY);
++	fd1 = open("cyusb.conf", O_RDONLY);
+ 	if ( fd1 < 0 ) {
+-		printf("/etc/cyusb.conf file not found. Exiting\n");
++		printf("cyusb.conf file not found. Exiting\n");
+ 		return -ENOENT;
+ 	}
+ 	else {
+diff -pur cyusb_linux_1.0.5.orig/Makefile cyusb_linux_1.0.5/Makefile
+--- cyusb_linux_1.0.5.orig/Makefile	2017-12-18 08:21:06.000000000 +0100
++++ cyusb_linux_1.0.5/Makefile	2021-02-21 13:12:52.230373246 +0100
+@@ -1,10 +1,11 @@
+ all:
+ 	g++ -fPIC -o lib/libcyusb.o -c lib/libcyusb.cpp
+ 	g++ -shared -Wl,-soname,libcyusb.so -o lib/libcyusb.so.1 lib/libcyusb.o -l usb-1.0 -l rt
++	ar rcs lib/libcyusb.a lib/libcyusb.o
+ 	cd lib; ln -sf libcyusb.so.1 libcyusb.so
+ 	rm -f lib/libcyusb.o
+ clean:
+-	rm -f lib/libcyusb.so lib/libcyusb.so.1
++	rm -f lib/libcyusb.so lib/libcyusb.so.1 lib/libcyusb.a
+ help:
+ 	@echo	'make		would compile and create the library and create a link'
+ 	@echo	'make clean	would remove the library and the soft link to the library (soname)'
+diff -pur cyusb_linux_1.0.5.orig/src/Makefile cyusb_linux_1.0.5/src/Makefile
+--- cyusb_linux_1.0.5.orig/src/Makefile	2017-12-18 08:21:06.000000000 +0100
++++ cyusb_linux_1.0.5/src/Makefile	2021-02-21 13:18:40.761397806 +0100
+@@ -7,8 +7,8 @@ all:
+ 	g++ -o 06_setalternate      06_setalternate.cpp      -L ../lib -l cyusb
+ 	g++ -o 08_cybulk            08_cybulk.cpp            -L ../lib -l cyusb -l pthread
+ 	g++ -o 09_cyusb_performance 09_cyusb_performance.cpp -L ../lib -l cyusb -l usb-1.0
+-	g++ -o download_fx2         download_fx2.cpp         -L ../lib -l cyusb
+-	g++ -o download_fx3         download_fx3.cpp         -L ../lib -l cyusb
++	g++ -o download_fx2         download_fx2.cpp         ../lib/libcyusb.a -l usb-1.0 -lpthread
++	g++ -o download_fx3         download_fx3.cpp         ../lib/libcyusb.a -l usb-1.0 -lpthread
+ 	g++ -o cyusbd               cyusbd.cpp               -L ../lib -l cyusb
+ 	gcc -o config_parser        config_parser.c          -L ../lib -l cyusb
+ 
